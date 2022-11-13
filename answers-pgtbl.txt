@@ -1,0 +1,14 @@
+>>>>>Which other xv6 system call(s) could be made faster using this shared page?
+mkdir?
+
+>>>>>What does page 0 contain?
+entry of next level page
+
+>>>>>What is in page 2
+The higher 44 bits of PA
+
+>>>>>When running in user mode, could the process read/write the memory mapped by page 1?
+no
+
+>>>>>what does the third to last page contain?
+mapped PA
