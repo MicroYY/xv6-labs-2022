@@ -1,0 +1,18 @@
+>>> Looking at the backtrace output, which function called syscall?
+usertrap()
+
+>>> What is the value of p->trapframe->a7 and what does that value represent?
+p->trapframe->a7 is 7, which represents SYS_exec
+
+>>> What was the previous mode that the CPU was in?
+User mode as SPP bit of $sstatus is 0.
+
+>>> Write down the assembly instruction the kernel is panicing at. Which register corresponds to the varialable num?
+0x80001ff4 <syscall+20> lw      a3,0(zero) # 0x0
+a3
+
+>>> Why does the kernel crash? Hint: look at figure 3-3 in the text; is address 0 mapped in the kernel address space? Is that confirmed by the value in scause above?
+Address 0x0 isn't mapped in kernel address space so is inaccessible. scause = 0x000000000000000d represents load page fault.
+
+>>> What is the name of the binary that was running when the kernel paniced? What is its process id (pid)?
+initcode. pid is 1;
