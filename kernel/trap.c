@@ -77,8 +77,52 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if(which_dev == 2) {
+    if (p->alarm_interval) {
+      p->time_span += 1;
+      if (p->time_span == p->alarm_interval) {
+        p->irpt.epc = p->trapframe->epc;
+        p->irpt.ra = p->trapframe->ra;
+        p->irpt.sp = p->trapframe->sp;
+        p->irpt.gp = p->trapframe->gp;
+        p->irpt.tp = p->trapframe->tp;
+
+        p->irpt.s0 = p->trapframe->s0;
+        p->irpt.s1 = p->trapframe->s1;
+        p->irpt.s2 = p->trapframe->s2;
+        p->irpt.s3 = p->trapframe->s3;
+        p->irpt.s4 = p->trapframe->s4;
+        p->irpt.s5 = p->trapframe->s5;
+        p->irpt.s6 = p->trapframe->s6;
+        p->irpt.s7 = p->trapframe->s7;
+        p->irpt.s8 = p->trapframe->s8;
+        p->irpt.s9 = p->trapframe->s9;
+        p->irpt.s10 = p->trapframe->s10;
+        p->irpt.s11 = p->trapframe->s11;
+
+        p->irpt.a0 = p->trapframe->a0;
+        p->irpt.a1 = p->trapframe->a1;
+        p->irpt.a2 = p->trapframe->a2;
+        p->irpt.a3 = p->trapframe->a3;
+        p->irpt.a4 = p->trapframe->a4;
+        p->irpt.a5 = p->trapframe->a5;
+        p->irpt.a6 = p->trapframe->a6;
+        p->irpt.a7 = p->trapframe->a7;
+
+        p->irpt.t0 = p->trapframe->t0;
+        p->irpt.t1 = p->trapframe->t1;
+        p->irpt.t2 = p->trapframe->t2;
+        p->irpt.t3 = p->trapframe->t3;
+        p->irpt.t4 = p->trapframe->t4;
+        p->irpt.t5 = p->trapframe->t5;
+        p->irpt.t6 = p->trapframe->t6;
+
+        p->time_span = 0;
+        p->trapframe->epc = (uint64)p->callback;
+      }
+    }
     yield();
+  }
 
   usertrapret();
 }
