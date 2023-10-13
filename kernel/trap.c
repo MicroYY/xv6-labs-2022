@@ -37,6 +37,7 @@ void
 usertrap(void)
 {
   int which_dev = 0;
+  uint64 scause;
 
   if((r_sstatus() & SSTATUS_SPP) != 0)
     panic("usertrap: not from user mode");
@@ -50,7 +51,7 @@ usertrap(void)
   // save user program counter.
   p->trapframe->epc = r_sepc();
   
-  if(r_scause() == 8){
+  if((scause = r_scause()) == 8){
     // system call
 
     if(killed(p))
@@ -67,6 +68,50 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if(scause == 0xf){
+    // COW page fault
+    //printf("scause %p pid=%d process %s\n", r_scause(), p->pid, p->name);
+    //printf("sepc=%p stval=%p\n", r_sepc(), r_stval());
+    
+    uint64 va = r_stval();
+    if(va >= MAXVA){
+      setkilled(p);
+      exit(-1);
+    }
+
+    pte_t *pte = walk(p->pagetable, va, 0);
+    if(pte == 0){
+      setkilled(p);
+    }
+    if((*pte & PTE_V) == 0){
+    }
+    if(*pte & PTE_RSW){
+      uint64 pa = PTE2PA(*pte);
+      uint flags = PTE_FLAGS(*pte);
+
+      if(GetRef((void*)pa) == 1){
+        *pte = *pte | PTE_W;
+        *pte = *pte & ~PTE_RSW;
+      }
+      else{
+        char *new_pa;
+
+        if((new_pa = kalloc()) == 0){
+          setkilled(p);
+          exit(-1);
+        }
+        else{
+          uvmunmap(p->pagetable, PGROUNDDOWN(va), 1, 1);
+          memmove(new_pa, (char*)pa, PGSIZE);
+          flags &= ~PTE_RSW;
+          mappages(p->pagetable, PGROUNDDOWN(va), PGSIZE, (uint64)new_pa, flags | PTE_W);
+        }
+      }
+    }
+    else{
+      setkilled(p);
+    }
+
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());

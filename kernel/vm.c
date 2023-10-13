@@ -184,7 +184,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
-      uint64 pa = PTE2PA(*pte);
+    uint64 pa = PTE2PA(*pte);
       kfree((void*)pa);
     }
     *pte = 0;
@@ -308,7 +308,6 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
@@ -317,13 +316,17 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+
+    if (flags & PTE_W){
+      flags &= ~PTE_W;
+      flags |= PTE_RSW;
+      *pte = (*pte & ~PTE_W) | PTE_RSW;
+    }
+    
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
       goto err;
     }
+    Increment((void*)pa);
   }
   return 0;
 
@@ -353,16 +356,54 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
 
+  if(dstva >= MAXVA){
+    return -1;
+  }
+
+
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);
+
+    pte_t* pte = walk(pagetable, va0, 0);
+    if(pte == 0){
+      return -1;
+    }
+    uint flags = PTE_FLAGS(*pte);
+
     if(pa0 == 0)
       return -1;
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
-    memmove((void *)(pa0 + (dstva - va0)), src, n);
 
+    if(*pte & PTE_RSW) {
+      //printf("COW!\n");
+
+      if(GetRef((void*)pa0) == 1){
+        *pte = *pte | PTE_W;
+        *pte = *pte & ~PTE_RSW;
+        memmove((void *)(pa0 + (dstva - va0)), src, n);
+      }
+      else{
+        char *new_pa = (char*)kalloc();
+        if(new_pa == 0){
+          return -1;
+        }
+        else{
+          uvmunmap(pagetable, PGROUNDDOWN(dstva), 1, 1);
+          memmove((void*)(new_pa), (void*)((pa0)), PGSIZE);
+          memmove((void*)(new_pa + (dstva - va0)), src, n);
+          flags &= ~PTE_RSW;
+          mappages(pagetable, PGROUNDDOWN(dstva), PGSIZE, (uint64)new_pa, flags | PTE_W);
+        }
+      }
+
+    }
+    else{
+      memmove((void *)(pa0 + (dstva - va0)), src, n);
+      //printf("non-COW!\n");
+    }
     len -= n;
     src += n;
     dstva = va0 + PGSIZE;

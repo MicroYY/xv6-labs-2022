@@ -9,6 +9,8 @@
 #include "riscv.h"
 #include "defs.h"
 
+#define OFFSET  PGROUNDUP((uint64)(end))/PGSIZE
+
 void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
@@ -21,6 +23,7 @@ struct run {
 struct {
   struct spinlock lock;
   struct run *freelist;
+  uint64 ref[RAM/PGSIZE];
 } kmem;
 
 void
@@ -36,7 +39,10 @@ freerange(void *pa_start, void *pa_end)
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
   for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
+  {
     kfree(p);
+    kmem.ref[(uint64)p/PGSIZE - OFFSET] = 0;
+  }
 }
 
 // Free the page of physical memory pointed at by pa,
@@ -50,13 +56,19 @@ kfree(void *pa)
 
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
-
+  
+  acquire(&kmem.lock);
+  
+  if(kmem.ref[(uint64)pa/PGSIZE - OFFSET]-- > 1)
+  {
+    release(&kmem.lock);
+    return;
+  }
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
   r = (struct run*)pa;
 
-  acquire(&kmem.lock);
   r->next = kmem.freelist;
   kmem.freelist = r;
   release(&kmem.lock);
@@ -73,10 +85,34 @@ kalloc(void)
   acquire(&kmem.lock);
   r = kmem.freelist;
   if(r)
+  {
     kmem.freelist = r->next;
+    kmem.ref[(uint64)r/4096 - OFFSET] = 1;
+  }
   release(&kmem.lock);
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+}
+
+void Increment(void *pa)
+{
+  acquire(&kmem.lock);
+
+  kmem.ref[(uint64)pa/4096 - OFFSET]++;
+  release(&kmem.lock);
+}
+
+void Decrement(void *pa)
+{
+  acquire(&kmem.lock);
+
+  kmem.ref[(uint64)pa/4096 - OFFSET]--;
+  release(&kmem.lock);
+}
+
+int GetRef(void *pa)
+{
+  return kmem.ref[(uint64)pa/4096 - OFFSET];
 }
