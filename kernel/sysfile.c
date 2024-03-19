@@ -302,6 +302,38 @@ create(char *path, short type, short major, short minor)
 }
 
 uint64
+sys_symlink(void)
+{
+  char target[MAXPATH], path[MAXPATH];
+  if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
+    return -1;
+
+  struct inode* itarget, *ilink;
+
+  begin_op();
+
+  if((itarget = namei(target)) == 0){
+    // it's OK target does not exist
+  }
+
+  ilink = create(path, T_SYMLINK, 0, 0);
+  if(ilink == 0){
+    end_op();
+    return -1;
+  }
+
+  uint64 addr = (uint64)target;
+  int write;
+  if((write = writei(ilink, 0, addr, 0, MAXPATH)) != MAXPATH){
+    panic("symlink: writei");
+  }
+
+  iunlockput(ilink);
+  end_op();
+  return 0;
+}
+
+uint64
 sys_open(void)
 {
   char path[MAXPATH];
@@ -332,6 +364,44 @@ sys_open(void)
       iunlockput(ip);
       end_op();
       return -1;
+    }
+  }
+
+  if(ip->type == T_SYMLINK){
+    if(omode & O_NOFOLLOW)
+    {
+      // open the target inode
+    }
+    else
+    {
+      // open symlink
+      static int max_depth = 9;
+      for(int i = 0; i <= max_depth; i++){
+        uint64 addr = (uint64)path;
+        int read;
+        if((read = readi(ip, 0, addr, 0, MAXPATH)) != MAXPATH){
+          panic("open: readi");
+        }
+        iunlock(ip);
+        if((ip = namei(path)) == 0){
+          end_op();
+          return -1;
+        }
+        ilock(ip);
+
+        if(ip->type != T_SYMLINK){
+          break;
+        }
+        else
+        {
+          if(i == max_depth)
+          {
+            iunlock(ip);
+            end_op();
+            return -1;
+          }
+        }
+      }
     }
   }
 
