@@ -19,7 +19,7 @@
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
 static int
-argfd(int n, int *pfd, struct file **pf)
+ argfd(int n, int *pfd, struct file **pf)
 {
   int fd;
   struct file *f;
@@ -501,5 +501,100 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+
+uint64 sys_mmap(void)
+{
+  uint64 addr;
+  int length, prot, flags, offset, fd;
+  struct file *f;
+
+  uint64 retaddr;
+
+  argaddr(0, &addr);
+  argint(1, &length);
+  argint(2, &prot);
+  argint(3, &flags);
+  argfd(4, 0, &f);
+  argint(4, &fd);
+  argint(5, &offset);
+
+  if(!f->writable && (prot & PROT_READ) && (prot & PROT_WRITE) && (flags & MAP_SHARED)){
+    return 0xffffffffffffffff;
+  }
+
+  struct proc *p = myproc();
+  retaddr = p->sz;
+  p->sz += length;
+
+  struct vma* v = 0;
+  int i = 0;
+  for(i = 0; i < NOFILE; i++){
+    if(p->vmas[i].inuse == 0){
+      p->vmas[i].inuse = 1;
+      v = &p->vmas[i];
+      break;
+    }
+  }
+  if(v == 0){
+    return 0xffffffffffffffff;
+  }
+
+  v->addr       = retaddr;
+  v->f          = f;
+  v->flags      = flags;
+  v->length     = length;
+  v->prot       = prot;
+  v->offset     = offset;
+
+  filedup(f);
+
+  return retaddr;
+}
+
+uint64 sys_munmap(void)
+{
+  uint64 addr;
+  int length;
+
+  argaddr(0, &addr);
+  argint(1, &length);
+
+  struct proc *p = myproc();
+
+  struct file* f = 0;
+  struct vma* v;
+
+  int i;
+  for(i = 0; i < NOFILE; i++){
+    v = &p->vmas[i];
+    if (addr >= v->addr && addr < (v->addr + v->length)){
+      f = v->f;
+      break;
+    }
+  }
+
+  if(v == 0){
+    panic("no vma");
+  }
+
+  if(v->flags & MAP_SHARED){
+    filewrite(f, addr, length);
+  }
+
+  int nofreepg = length / PGSIZE;
+  int nopg     = v->length /PGSIZE;
+  
+  pte_t* pte = walk(p->pagetable, addr, 0);
+  if (*pte & PTE_V)
+  {
+    uvmunmap(p->pagetable, addr, nofreepg, 1);
+    if(nofreepg == nopg){
+      filedec(f);
+      v->inuse = 0;
+    }
+  }
+
   return 0;
 }

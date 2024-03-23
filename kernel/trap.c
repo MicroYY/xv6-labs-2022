@@ -3,8 +3,12 @@
 #include "memlayout.h"
 #include "riscv.h"
 #include "spinlock.h"
+#include "sleeplock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fs.h"
+#include "file.h"
+#include "fcntl.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -37,6 +41,7 @@ void
 usertrap(void)
 {
   int which_dev = 0;
+  uint64 scause;
 
   if((r_sstatus() & SSTATUS_SPP) != 0)
     panic("usertrap: not from user mode");
@@ -50,7 +55,7 @@ usertrap(void)
   // save user program counter.
   p->trapframe->epc = r_sepc();
   
-  if(r_scause() == 8){
+  if((scause = r_scause()) == 8){
     // system call
 
     if(killed(p))
@@ -65,6 +70,47 @@ usertrap(void)
     intr_on();
 
     syscall();
+  } else if(scause == 0xd){
+    // load page fault
+    uint64 va  = r_stval();
+
+    struct file* f = 0;
+    struct vma* v;
+
+    int i = 0;
+    for(i = 0; i < NOFILE; i++){
+      v = &p->vmas[i];
+      if (va >= v->addr && va < (v->addr + v->length)){
+        f = v->f;
+        break;
+      }
+    }
+    
+    if(f == 0){
+      setkilled(p);
+      exit(-1);
+    }
+
+    pte_t *pte = walk(p->pagetable, va, 1);
+
+    if(*pte & PTE_V){
+    }
+    else{
+      int pte_flag = PTE_V | PTE_U;
+      if(v->prot & PROT_READ){
+        pte_flag |= PTE_R;
+      }
+      if(v->prot & PROT_WRITE){
+        pte_flag |= PTE_W;
+      }
+
+      char* new_pa = kalloc();
+      memset(new_pa, 0, PGSIZE);
+      mappages(p->pagetable, PGROUNDDOWN(va), PGSIZE, (uint64)new_pa, pte_flag);
+      ilock(f->ip);
+      readi(f->ip, 0, (uint64)new_pa, va - v->addr , PGSIZE);
+      iunlock(f->ip);
+    }
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
